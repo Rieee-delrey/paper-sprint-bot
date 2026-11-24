@@ -84,7 +84,33 @@ function markValue(state: BotState, mint: string, tokens: bigint): bigint {
   return (tokens * curve.virtual_quote_reserves) / curve.virtual_token_reserves;
 }
 
+// Fail fast on a misconfigured run: the strategy only makes sense when the
+// harness gives it room for several positions and a sane order size, and
+// when its own parameters are internally consistent.
+function validateRun(state: BotState): void {
+  const caps = state.hello.caps;
+  if (caps.max_open_positions < 1) throw new Error('harness allows no open positions');
+  if (caps.max_orders_per_batch < 1) throw new Error('harness allows no orders per batch');
+  if (caps.max_order_bps_of_real_reserve <= 0) throw new Error('harness order-size cap is zero');
+  if (MIN_FLOW_LAMPORTS <= 0n) throw new Error('min flow must be positive');
+  if (STAKE_LAMPORTS <= 0n) throw new Error('stake must be positive');
+  if (MIN_REAL_SOL >= MAX_REAL_SOL) throw new Error('real-reserve band is empty');
+  if (TP_BPS <= 0 || SL_BPS <= 0 || TP_BPS >= 10000 || SL_BPS >= 10000) {
+    throw new Error('take-profit / stop-loss must be between 0 and 10000 bps');
+  }
+  if (MAX_HOLD_SLOTS <= 0 || MAX_AGE_SLOTS < 0 || FLOW_WINDOW_SLOTS <= 0) {
+    throw new Error('slot windows must be positive');
+  }
+  if (BigInt(state.hello.capital.lamports) < STAKE_LAMPORTS + state.txFeeLamports()) {
+    throw new Error('capital cannot cover one stake plus its tx fee');
+  }
+}
+
 const bot: Bot = {
+  onHello(state: BotState): void {
+    validateRun(state);
+  },
+
   onBatch(state: BotState, batch: Batch): OrderInput[] {
     const now = state.slot;
 
